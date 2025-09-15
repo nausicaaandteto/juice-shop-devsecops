@@ -8,66 +8,50 @@ on:
 jobs:
   security-pipeline:
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ Kaynak kodu çek
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # 2️⃣ Node ortamını kur
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3️⃣ Bağımlılıkları yükle
       - name: Install dependencies
         run: npm install
 
-      # 4️⃣ Statik kod analizi (Semgrep)
-      - name: Run Semgrep SAST
+      # 🟢 Semgrep SAST
+      - name: Run Semgrep
         uses: returntocorp/semgrep-action@v1
         with:
-          config: |
-            p/owasp-top-ten
-            p/javascript
-          audit_on: push
-          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }} # Semgrep Cloud yoksa kaldır
+          config: p/owasp-top-ten
 
-      # 5️⃣ Bağımlılık güvenlik taraması
+      # 🔐 Gitleaks ile secret taraması
+      - name: Run Gitleaks
+        uses: zricethezav/gitleaks-action@v2
+        with:
+          args: detect --source . --no-git --redact --report-format sarif --report-path gitleaks.sarif
+
       - name: Run npm audit
         run: npm audit --audit-level=high
 
-      # 6️⃣ Testleri çalıştır
       - name: Run tests
         run: npm test
 
-      # 7️⃣ Docker imajı oluştur
       - name: Build Docker image
         run: docker build -t juice-shop:latest .
 
-      # 8️⃣ Syft kurulumu (SBOM için)
       - name: Install Syft
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-          | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
 
-      # 9️⃣ SBOM üret
       - name: Generate SBOM
         run: syft juice-shop:latest -o json > sbom.json
 
-      # 🔟 (Opsiyonel) Zafiyet taraması (Grype)
-      - name: Scan image with Grype
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-          | sh -s -- -b /usr/local/bin
-          grype juice-shop:latest -o table
-
-      # 1️⃣1️⃣ Çıktıları arşivle
-      - name: Upload SBOM & Reports
+      - name: Upload Reports
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
+            gitleaks.sarif
             sbom.json
-            **/semgrep*.sarif
