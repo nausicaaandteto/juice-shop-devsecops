@@ -1,4 +1,4 @@
-name: Juice Shop Security Scan
+name: Super Security CI
 
 on:
   push:
@@ -6,42 +6,68 @@ on:
   pull_request:
 
 jobs:
-  build-test-sbom:
+  security-pipeline:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Kaynak kodu çek
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # (Opsiyonel) Node ortamı gerekiyorsa
+      # 2️⃣ Node ortamını kur
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # 3️⃣ Bağımlılıkları yükle
       - name: Install dependencies
-        run: |
-          npm install
+        run: npm install
 
+      # 4️⃣ Statik kod analizi (Semgrep)
+      - name: Run Semgrep SAST
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: |
+            p/owasp-top-ten
+            p/javascript
+          audit_on: push
+          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }} # Semgrep Cloud yoksa kaldır
+
+      # 5️⃣ Bağımlılık güvenlik taraması
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+
+      # 6️⃣ Testleri çalıştır
       - name: Run tests
-        run: |
-          npm test
+        run: npm test
 
+      # 7️⃣ Docker imajı oluştur
       - name: Build Docker image
-        run: |
-          docker build -t juice-shop:latest .
+        run: docker build -t juice-shop:latest .
 
+      # 8️⃣ Syft kurulumu (SBOM için)
       - name: Install Syft
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+          | sh -s -- -b /usr/local/bin
 
+      # 9️⃣ SBOM üret
       - name: Generate SBOM
-        run: |
-          syft juice-shop:latest -o table > sbom.txt
-          cat sbom.txt
+        run: syft juice-shop:latest -o json > sbom.json
 
-      - name: Upload SBOM
+      # 🔟 (Opsiyonel) Zafiyet taraması (Grype)
+      - name: Scan image with Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+          | sh -s -- -b /usr/local/bin
+          grype juice-shop:latest -o table
+
+      # 1️⃣1️⃣ Çıktıları arşivle
+      - name: Upload SBOM & Reports
         uses: actions/upload-artifact@v4
         with:
-          name: sbom
-          path: sbom.txt
+          name: security-reports
+          path: |
+            sbom.json
+            **/semgrep*.sarif
